@@ -8,7 +8,7 @@
 #include "sleeplock.h"
 #include "file.h"
 
-#define PIPESIZE 512
+#define PIPESIZE 1024
 
 struct pipe {
   struct spinlock lock;
@@ -92,14 +92,17 @@ pipewrite(struct pipe *pi, uint64 addr, int n)
       int k = 0;
       //pi->nwrite % PIPESIZE = write's position in buffer
       //pi->nwrite - (pi->nread + PIPESIZE) = how much buffer space isn't filled with unread data
-      if(pi->nwrite % PIPESIZE < n && pi->nwrite % PIPESIZE < (pi->nread + PIPESIZE) - pi->nwrite && pi->nwrite % PIPESIZE != 0){
+      if(pi->nwrite % PIPESIZE < n-i && pi->nwrite % PIPESIZE < (pi->nread + PIPESIZE) - pi->nwrite && pi->nwrite % PIPESIZE != 0){
         k = pi->nwrite % PIPESIZE;
-      } else if ((pi->nread + PIPESIZE) - pi->nwrite < n){
+        //printf("if k = %d", k);
+      } else if ((pi->nread + PIPESIZE) - pi->nwrite < n-i){     
         k = (pi->nread + PIPESIZE) - pi->nwrite;
+        //printf("elif k = %d", k);
       } else {
-        k = n;
+        k = n-i;
+        //printf("el k = %d", k);
       }
-      if(copyin(pr->pagetable, &pi->data[pi->nwrite % PIPESIZE], addr, k) == -1)
+      if(copyin(pr->pagetable, &pi->data[pi->nwrite % PIPESIZE], addr+i, k) == -1)
         break;
        pi->nwrite+=k;
       i+=k;

@@ -58,8 +58,6 @@ int main(){
     struct xorshift32_state* checkState = malloc(sizeof(struct xorshift32_state));
     checkState->a = seed;
     while(checkCount < TM_INT){
-        //if(checkCount % 1000 == 0 /*|| checkCount == 0*/)
-        printf("ping %d\n", checkCount);
         int check = xorshift32(checkState);
         if(readVals[checkCount] != check){
             printf("Data Corruption!\n Val = %d | xor = %d | checkCount = %d \
