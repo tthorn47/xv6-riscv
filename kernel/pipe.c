@@ -78,7 +78,7 @@ pipewrite(struct pipe *pi, uint64 addr, int n)
 {
   int i = 0;
   struct proc *pr = myproc();
-
+  //char buf[PIPESIZE];
   acquire(&pi->lock);
   while(i < n){
     if(pi->readopen == 0 || pr->killed){
@@ -89,13 +89,23 @@ pipewrite(struct pipe *pi, uint64 addr, int n)
       wakeup(&pi->nread);
       sleep(&pi->nwrite, &pi->lock);
     } else {
-      char ch;
-      if(copyin(pr->pagetable, &ch, addr + i, 1) == -1)
+      int k = 0;
+      //pi->nwrite % PIPESIZE = write's position in buffer
+      //pi->nwrite - (pi->nread + PIPESIZE) = how much buffer space isn't filled with unread data
+      if(pi->nwrite % PIPESIZE < n && pi->nwrite % PIPESIZE < (pi->nread + PIPESIZE) - pi->nwrite && pi->nwrite % PIPESIZE != 0){
+        k = pi->nwrite % PIPESIZE;
+      } else if ((pi->nread + PIPESIZE) - pi->nwrite < n){
+        k = (pi->nread + PIPESIZE) - pi->nwrite;
+      } else {
+        k = n;
+      }
+      if(copyin(pr->pagetable, &pi->data[pi->nwrite % PIPESIZE], addr, k) == -1)
         break;
-      pi->data[pi->nwrite++ % PIPESIZE] = ch;
-      i++;
+       pi->nwrite+=k;
+      i+=k;
     }
   }
+  //bad:
   wakeup(&pi->nread);
   release(&pi->lock);
 
@@ -105,9 +115,9 @@ pipewrite(struct pipe *pi, uint64 addr, int n)
 int
 piperead(struct pipe *pi, uint64 addr, int n)
 {
-  int i;
+  int i = 1;
   struct proc *pr = myproc();
-  char ch;
+  
 
   acquire(&pi->lock);
   while(pi->nread == pi->nwrite && pi->writeopen){  //DOC: pipe-empty
@@ -117,13 +127,22 @@ piperead(struct pipe *pi, uint64 addr, int n)
     }
     sleep(&pi->nread, &pi->lock); //DOC: piperead-sleep
   }
-  for(i = 0; i < n; i++){  //DOC: piperead-copy
-    if(pi->nread == pi->nwrite)
-      break;
-    ch = pi->data[pi->nread++ % PIPESIZE];
-    if(copyout(pr->pagetable, addr + i, &ch, 1) == -1)
-      break;
-  }
+  //char ch[pi->nread % PIPESIZE];
+  //for(i = 0; i < n; i++){  //DOC: piperead-copy
+    //if(pi->nread == pi->nwrite)
+      //break;
+    if(pi->nread % PIPESIZE < n && pi->nread % PIPESIZE < (pi->nwrite-pi->nread) && pi->nread % PIPESIZE != 0){
+      i = pi->nread % PIPESIZE;
+    } else if ((pi->nread - pi->nwrite) < n){
+      i = pi->nread - pi->nwrite;
+    } else {
+      i = n;
+    }
+
+    pi->nread+=i;
+    if(copyout(pr->pagetable, addr, &pi->data[pi->nread % PIPESIZE], i) == -1)
+      printf("fuck");
+  //}
   wakeup(&pi->nwrite);  //DOC: piperead-wakeup
   release(&pi->lock);
   return i;
