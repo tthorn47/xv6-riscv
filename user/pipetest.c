@@ -17,7 +17,7 @@ int main(){
     {
         writeVals[i] = xorshift32(state);
     }
-
+    printf("Send = %d\n", writeVals[0]);
     if((k = pipe(flags)) < 0){
         exit(k);
     }
@@ -43,25 +43,31 @@ int main(){
     
     while(readCount < TEN_MEG){
         //Loop on 512 is the best fit, it never reads more than that anyway
-        if((err = read(flags[0], ((char*)readVals)+readCount, 512)) < 0){
+        if((err = read(flags[0], ((char*)readVals)+readCount, 1024)) < 0){
             printf("couldn't read %d", err);
             exit(0);
         }
+        if(readCount == 0){
+            printf("First Read %d\n", readVals[0]);
+        }
         readCount+=(err);
     }
-
+    
     int fin = uptime() - start;
     printf("Total ticks = %d\n", fin);
 
     int checkCount = 0;
+    printf("before %d\n", readVals[checkCount]);
+    printf("rand %d | %d", readVals[16900], writeVals[16900]);
     //check against another xorstate just to be sure
     struct xorshift32_state* checkState = malloc(sizeof(struct xorshift32_state));
     checkState->a = seed;
     while(checkCount < TM_INT){
+        
         int check = xorshift32(checkState);
         if(readVals[checkCount] != check){
             printf("Data Corruption!\n Val = %d | xor = %d | checkCount = %d \
-                \nExiting!\n", readVals[checkCount+readCount], check, checkCount);
+                \nExiting!\n", readVals[checkCount], check, checkCount);
             exit(-1);
         }
         checkCount++;

@@ -102,6 +102,9 @@ pipewrite(struct pipe *pi, uint64 addr, int n)
         k = n-i;
         //printf("el k = %d", k);
       }
+      // if(k == 1024){
+      //   printf("k = %d\n", k);
+      // }
       if(copyin(pr->pagetable, &pi->data[pi->nwrite % PIPESIZE], addr+i, k) == -1)
         break;
        pi->nwrite+=k;
@@ -118,7 +121,7 @@ pipewrite(struct pipe *pi, uint64 addr, int n)
 int
 piperead(struct pipe *pi, uint64 addr, int n)
 {
-  int i = 1;
+  int i = 0;
   struct proc *pr = myproc();
   
 
@@ -130,21 +133,25 @@ piperead(struct pipe *pi, uint64 addr, int n)
     }
     sleep(&pi->nread, &pi->lock); //DOC: piperead-sleep
   }
-  //char ch[pi->nread % PIPESIZE];
-  //for(i = 0; i < n; i++){  //DOC: piperead-copy
-    //if(pi->nread == pi->nwrite)
-      //break;
+    //Check for the smallest of three values, commit that value to copyout
+    //1. The amount the user requests: n
+    //2. The amount of unread data in the pipe: (pi->nwrite-pi->nread)
+    //3. The pipes position relative to the end (a wrap around is needed): pi->nread % PIPESIZE
     if(pi->nread % PIPESIZE < n && pi->nread % PIPESIZE < (pi->nwrite-pi->nread) && pi->nread % PIPESIZE != 0){
       i = pi->nread % PIPESIZE;
-    } else if ((pi->nread - pi->nwrite) < n){
-      i = pi->nread - pi->nwrite;
+    } else if ((pi->nwrite - pi->nread) < n){
+      i = pi->nwrite - pi->nread;
     } else {
       i = n;
     }
-
-    pi->nread+=i;
-    if(copyout(pr->pagetable, addr, &pi->data[pi->nread % PIPESIZE], i) == -1)
-      printf("fuck");
+    //printf("Provided Addr = %p\nBuffer Position = %p\n", addr, &pi->data[pi->nread % PIPESIZE]);
+    //increment nread and return the value of bytes copied only if the copyout returns zero
+    if(copyout(pr->pagetable, addr, &pi->data[pi->nread % PIPESIZE], i) == -1){
+      printf("read failed\n");
+      i = 0;
+    } else {
+      pi->nread+=i;
+    }
   //}
   wakeup(&pi->nwrite);  //DOC: piperead-wakeup
   release(&pi->lock);
