@@ -132,5 +132,19 @@ memcmp(const void *s1, const void *s2, uint n)
 void *
 memcpy(void *dst, const void *src, uint n)
 {
-  return memmove(dst, src, n);
+    const char *s;
+    char *d;
+    s = src;
+    d = dst;
+
+  if((uint64)d % 8 != 0 || (uint64)s % 8 != 0 || n % 8 != 0){
+    return memmove(dst, src, n);
+  }
+
+  int pad = 0;
+  for (; n > 0; n-=8, pad += 8)
+  {
+    *(u64 *)(d+pad) = *(u64 *)(s+pad);
+  }
+  return dst;
 }

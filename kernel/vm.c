@@ -353,7 +353,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
-    memmove((void *)(pa0 + (dstva - va0)), src, n);
+    umemcpy((void *)(pa0 + (dstva - va0)), src, n);
 
     len -= n;
     src += n;
@@ -378,13 +378,32 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
     n = PGSIZE - (srcva - va0);
     if(n > len)
       n = len;
-    memmove(dst, (void *)(pa0 + (srcva - va0)), n);
+    umemcpy(dst, (void *)(pa0 + (srcva - va0)), n);
 
     len -= n;
     dst += n;
     srcva = va0 + PGSIZE;
   }
   return 0;
+}
+
+void*
+umemcpy(void *dst, const void *src, uint n)
+{
+    const char *s;
+    char *d;
+    s = src;
+    d = dst;
+  if((uint64)d % 8 != 0 || (uint64)s % 8 != 0 || n % 8 != 0){
+    return memmove(dst, src, n);
+  }
+
+  int pad = 0;
+  for (; n > 0; n-=8, pad += 8)
+  {
+    *(u64 *)(d+pad) = *(u64 *)(s+pad);
+  }
+  return dst;
 }
 
 // Copy a null-terminated string from user to kernel.

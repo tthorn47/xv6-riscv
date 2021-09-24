@@ -484,3 +484,16 @@ sys_pipe(void)
   }
   return 0;
 }
+
+uint64
+sys_ringbuf(void){
+  char name[16];
+  int res = argstr(0, name, 15);
+  if (res < 0)
+  {
+    return -1;
+  }
+  
+  printf("%s in the kernel!\n", name);
+  return 0;
+}

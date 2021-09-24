@@ -8,7 +8,17 @@
 #include "sleeplock.h"
 #include "file.h"
 
-#define PIPESIZE 1024
+/*
+ * The optimizations present here over the base xv6 impl
+ * should generate a roughly 4x speed up measured in 
+ * xv6 system ticks on UofU CADE lab machines. 
+ * 
+ * Read/Write always take max available bytes
+ * memcpy has been implemented to copy 8 bytes at a time when aligned as such
+ */
+
+
+#define PIPESIZE 2048
 
 struct pipe {
   struct spinlock lock;
@@ -94,20 +104,14 @@ pipewrite(struct pipe *pi, uint64 addr, int n)
       //pi->nwrite - (pi->nread + PIPESIZE) = how much buffer space isn't filled with unread data
       if(pi->nwrite % PIPESIZE < n-i && pi->nwrite % PIPESIZE < (pi->nread + PIPESIZE) - pi->nwrite && pi->nwrite % PIPESIZE != 0){
         k = pi->nwrite % PIPESIZE;
-        //printf("if k = %d", k);
       } else if ((pi->nread + PIPESIZE) - pi->nwrite < n-i){     
         k = (pi->nread + PIPESIZE) - pi->nwrite;
-        //printf("elif k = %d", k);
       } else {
         k = n-i;
-        //printf("el k = %d", k);
       }
-      // if(k == 1024){
-      //   printf("k = %d\n", k);
-      // }
       if(copyin(pr->pagetable, &pi->data[pi->nwrite % PIPESIZE], addr+i, k) == -1)
         break;
-       pi->nwrite+=k;
+      pi->nwrite+=k;
       i+=k;
     }
   }
@@ -136,7 +140,7 @@ piperead(struct pipe *pi, uint64 addr, int n)
     //Check for the smallest of three values, commit that value to copyout
     //1. The amount the user requests: n
     //2. The amount of unread data in the pipe: (pi->nwrite-pi->nread)
-    //3. The pipes position relative to the end (a wrap around is needed): pi->nread % PIPESIZE
+    //3. The read's position relative to the end (a wrap around is needed): pi->nread % PIPESIZE
     if(pi->nread % PIPESIZE < n && pi->nread % PIPESIZE < (pi->nwrite-pi->nread) && pi->nread % PIPESIZE != 0){
       i = pi->nread % PIPESIZE;
     } else if ((pi->nwrite - pi->nread) < n){
@@ -144,7 +148,7 @@ piperead(struct pipe *pi, uint64 addr, int n)
     } else {
       i = n;
     }
-    //printf("Provided Addr = %p\nBuffer Position = %p\n", addr, &pi->data[pi->nread % PIPESIZE]);
+
     //increment nread and return the value of bytes copied only if the copyout returns zero
     if(copyout(pr->pagetable, addr, &pi->data[pi->nread % PIPESIZE], i) == -1){
       printf("read failed\n");
@@ -152,7 +156,6 @@ piperead(struct pipe *pi, uint64 addr, int n)
     } else {
       pi->nread+=i;
     }
-  //}
   wakeup(&pi->nwrite);  //DOC: piperead-wakeup
   release(&pi->lock);
   return i;

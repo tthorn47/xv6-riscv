@@ -1,8 +1,8 @@
 #include "xorshift.c"
 #include "user.h"
 
-#define TEN_MEG 10000000
-#define TM_INT 2500000
+#define TEN_MEG 1024 * 1024 * 10
+#define TM_INT TEN_MEG/4
 
 int main(){
     int k, i;
@@ -17,7 +17,7 @@ int main(){
     {
         writeVals[i] = xorshift32(state);
     }
-    printf("Send = %d\n", writeVals[0]);
+    //printf("Send = %d\n", writeVals[0]);
     if((k = pipe(flags)) < 0){
         exit(k);
     }
@@ -47,9 +47,6 @@ int main(){
             printf("couldn't read %d", err);
             exit(0);
         }
-        if(readCount == 0){
-            printf("First Read %d\n", readVals[0]);
-        }
         readCount+=(err);
     }
     
@@ -57,8 +54,6 @@ int main(){
     printf("Total ticks = %d\n", fin);
 
     int checkCount = 0;
-    printf("before %d\n", readVals[checkCount]);
-    printf("rand %d | %d", readVals[16900], writeVals[16900]);
     //check against another xorstate just to be sure
     struct xorshift32_state* checkState = malloc(sizeof(struct xorshift32_state));
     checkState->a = seed;
