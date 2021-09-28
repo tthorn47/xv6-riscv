@@ -487,13 +487,20 @@ sys_pipe(void)
 
 uint64
 sys_ringbuf(void){
+
   char name[16];
-  int res = argstr(0, name, 15);
-  if (res < 0)
-  {
+  if(argstr(0, name, 15) < 0)
     return -1;
-  }
-  
+
+  int flag;
+  if(argint(1, &flag) < 0)
+      return -1;
+    
+  uint64 point;
+  if (argaddr(2,&point) < 0)
+    return -1;
+
+  ring_call(name, flag, (void**)point);
   printf("%s in the kernel!\n", name);
   return 0;
 }

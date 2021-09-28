@@ -3,6 +3,9 @@
 
 int main(){
     const char* name = "ThisIsAName";
-    ringbuf(name);
+    void* pointer = malloc(sizeof(void*));
+
+    ringbuf(name,0,&pointer);
+    ringbuf(name,1,&pointer);
     exit(0);
 }
