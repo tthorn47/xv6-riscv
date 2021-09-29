@@ -190,6 +190,7 @@ void            virtio_disk_intr(void);
 int             ring_call(const char*, int, void**);
 extern struct ringbuf* resolve_name(const char*, int);
 int buf_alloc(struct ringbuf*, int);
+int get_index(struct ringbuf*);
 
 
 // number of elements in fixed-size array

@@ -9,8 +9,10 @@
 
 #define BUF_SIZE 4096
 #define MAX_BUFS 10
-#define HALF 4294967295
-
+#define FOURMEG 4194304
+#define MAX (92233720368 - 16384)
+#define GETADDR(i) (MAX - (i*(BUF_SIZE + 4096 + FOURMEG)))
+#define GETDUPADDR(i) (MAX - ((i*(BUF_SIZE + 4096 + FOURMEG)) - (BUFSIZE+4096)))
 struct ringbuf* ringbufs[MAX_BUFS];
 struct ringbuf {
     int refcount; // 0 for empty
@@ -71,12 +73,31 @@ struct ringbuf* resolve_name(const char* name, int flag){
 int buf_alloc(struct ringbuf* buf, int flag){
     struct proc* p = myproc();
     pagetable_t pt = p->pagetable;
-    if(flag ==0){
-        mappages(pt, PGROUNDDOWN(HALF), BUF_SIZE, (uint64)buf->buf, PTE_U | PTE_W | PTE_R | PTE_X);
-        mappages(pt, PGROUNDDOWN(HALF)+BUF_SIZE, BUF_SIZE, (uint64)buf->buf, PTE_U | PTE_W | PTE_R | PTE_X);
+    int index = get_index(buf);
+
+    if(flag == 0){
+        mappages(pt, PGROUNDDOWN(GETADDR(index)), BUF_SIZE, (uint64)buf->buf, PTE_U | PTE_W | PTE_R | PTE_X);
+        mappages(pt, PGROUNDDOWN(GETADDR(index))+BUF_SIZE, BUF_SIZE, (uint64)buf->buf, PTE_U | PTE_W | PTE_R | PTE_X);
+        mappages(pt, PGROUNDDOWN(GETADDR(index))+(BUF_SIZE*2), BUF_SIZE, (uint64)buf->book, PTE_U | PTE_W | PTE_R | PTE_X);
     } else {
         int free = buf->refcount == 0;
-        uvmunmap(pt, PGROUNDDOWN(HALF), 2, free);
+        uvmunmap(pt, PGROUNDDOWN(GETADDR(index)), 3, free);
+
+        if(free){
+            kfree(buf->buf);
+            kfree(buf->book);
+            kfree(buf);
+        }
     }
     return p->pid;
+}
+
+int get_index(struct ringbuf* buf){
+    int i;
+    for(i = 0; i < MAX_BUFS; i++){
+        if(buf == ringbufs[i]){
+            return i;
+        }
+    }
+    return -1;
 }
