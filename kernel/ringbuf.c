@@ -39,7 +39,7 @@ struct ringbuf* resolve_name(const char* name, int flag){
             continue;
         }
         if(strncmp(ringbufs[i]->name, name, namelen) == 0){
-            if(flag == 1){
+            if(!flag){
                 ringbufs[i]->refcount++;
             } else {
                 ringbufs[i]->refcount--;
@@ -73,9 +73,10 @@ int buf_alloc(struct ringbuf* buf, int flag){
     pagetable_t pt = p->pagetable;
     if(flag ==0){
         mappages(pt, PGROUNDDOWN(HALF), BUF_SIZE, (uint64)buf->buf, PTE_U | PTE_W | PTE_R | PTE_X);
+        mappages(pt, PGROUNDDOWN(HALF)+BUF_SIZE, BUF_SIZE, (uint64)buf->buf, PTE_U | PTE_W | PTE_R | PTE_X);
     } else {
         int free = buf->refcount == 0;
-        uvmunmap(pt, PGROUNDDOWN(HALF), 1, free);
+        uvmunmap(pt, PGROUNDDOWN(HALF), 2, free);
     }
     return p->pid;
 }

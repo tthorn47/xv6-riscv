@@ -3,9 +3,13 @@
 
 int main(){
     const char* name = "ThisIsAName";
-    void* pointer = malloc(sizeof(void*));
+    void* p = malloc(sizeof(void*));
 
-    ringbuf(name,0,&pointer);
-    ringbuf(name,1,&pointer);
+    ringbuf(name,0,&p);
+
+    p = "This was stored in the ring buffer!";
+    printf("%s\n",p);
+    ringbuf(name,1,&p);
+    free(p);
     exit(0);
 }

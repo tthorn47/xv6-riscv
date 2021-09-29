@@ -500,7 +500,5 @@ sys_ringbuf(void){
   if (argaddr(2,&point) < 0)
     return -1;
 
-  ring_call(name, flag, (void**)point);
-  printf("%s in the kernel!\n", name);
-  return 0;
+  return ring_call(name, flag, (void**)point);
 }
