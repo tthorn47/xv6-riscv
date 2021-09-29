@@ -187,8 +187,9 @@ void            virtio_disk_rw(struct buf *, int);
 void            virtio_disk_intr(void);
 
 // ringbuf.c
-int             ring_call(const char* name, int flag, void** mapping);
-extern struct ringbuf* resolve_name(const char* name);
+int             ring_call(const char*, int, void**);
+extern struct ringbuf* resolve_name(const char*, int);
+int buf_alloc(struct ringbuf*, int);
 
 
 // number of elements in fixed-size array

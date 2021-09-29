@@ -7,10 +7,9 @@
 #include "syscall.h"
 #include "defs.h"
 
-
-
-#define RINGBUF_SIZE 4096
+#define BUF_SIZE 4096
 #define MAX_BUFS 10
+#define HALF 4294967295
 
 struct ringbuf* ringbufs[MAX_BUFS];
 struct ringbuf {
@@ -22,11 +21,12 @@ struct ringbuf {
 
 
 int ring_call(const char* name, int flag, void** mapping){
-    struct ringbuf* buf = resolve_name(name);
+    struct ringbuf* buf = resolve_name(name, flag);
+    buf_alloc(buf, flag);
     return buf->refcount;
 }
 
-struct ringbuf* resolve_name(const char* name){
+struct ringbuf* resolve_name(const char* name, int flag){
     int namelen;
     if((namelen = strlen(name)) > 15)
         return 0;
@@ -39,7 +39,11 @@ struct ringbuf* resolve_name(const char* name){
             continue;
         }
         if(strncmp(ringbufs[i]->name, name, namelen) == 0){
-            ringbufs[i]->refcount++;
+            if(flag == 1){
+                ringbufs[i]->refcount++;
+            } else {
+                ringbufs[i]->refcount--;
+            }
             printf("Ringbuffer found!\n");
             return ringbufs[i];
         }
@@ -62,4 +66,16 @@ struct ringbuf* resolve_name(const char* name){
     }
 
     return 0;
+}
+
+int buf_alloc(struct ringbuf* buf, int flag){
+    struct proc* p = myproc();
+    pagetable_t pt = p->pagetable;
+    if(flag ==0){
+        mappages(pt, PGROUNDDOWN(HALF), BUF_SIZE, (uint64)buf->buf, PTE_U | PTE_W | PTE_R | PTE_X);
+    } else {
+        int free = buf->refcount == 0;
+        uvmunmap(pt, PGROUNDDOWN(HALF), 1, free);
+    }
+    return p->pid;
 }
