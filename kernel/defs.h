@@ -190,7 +190,8 @@ int             ring_call(const char*, int, void**);
 extern struct ringbuf* resolve_name(const char*, int);
 int buf_alloc(struct ringbuf*, int);
 int get_index(struct ringbuf*);
-
+void resolve_kill(struct ringbuf*, int);
+void alloc_kill(struct ringbuf*, pagetable_t, int, int);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
