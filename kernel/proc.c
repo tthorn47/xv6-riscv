@@ -353,6 +353,15 @@ exit(int status)
     }
   }
 
+  for (int i = 0; i < 10; i++)
+  {
+    if(p->buffers[i] != 0){
+      alloc_kill(p->buffers[i], p->pagetable, i, -1);
+      p->buffers[i] = 0;
+    }
+  }
+  
+
   begin_op();
   iput(p->cwd);
   end_op();

@@ -6,7 +6,7 @@ int main(){
     void* p;
     //printf("%p\n", p);
     ringbuf(name,0, &p);
-    printf("%p\n", p);
+    //printf("%p\n", p);
 
     p = "This was stored in the ring buffer!";
     printf("%s\n",p);
@@ -27,5 +27,30 @@ int main(){
     ringbuf(name,1,&p);
     //free(p);
     //free(x);
+
+
+    int f = fork();
+
+    if(f == 0){
+        void* parent;
+        ringbuf("test", 0, &parent);
+        //sleep(15);
+        //ringbuf("test", 1, &parent);
+        exit(0);
+    }
+        // void* child;
+        // int stat = ringbuf("test", 0, &child);
+        // printf("%d\n", stat);
+        // child = "Exit test";
+        // exit(0);
+    // } else {
+        //int stat;
+        //printf("pid = %d\n", f);
+        void* parent;
+        ringbuf("test", 0, &parent);
+        // printf("%s\n", (char*)parent);
+        ringbuf("test", 1, &parent);
+        //wait(&stat);
+    //}
     exit(0);
 }

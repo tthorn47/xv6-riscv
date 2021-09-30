@@ -29,9 +29,11 @@ struct ringbuf {
 
 
 int ring_call(const char* name, int flag, void** mapping){
+
     if(arrLock.name == 0){
         initlock(&arrLock, "arrLock");
     }
+
     struct ringbuf* buf = resolve_name(name, flag);
     if(buf == 0){
         printf("Buffer not allocated, kalloc failure\n");
@@ -40,14 +42,18 @@ int ring_call(const char* name, int flag, void** mapping){
 
     if(buf_alloc(buf, flag) == 0){
         printf("Can't map into processes address space");
+        return -1;
     }
-    int dest = PGROUNDDOWN(GETADDR(get_index(buf)));
-    copyout(myproc()->pagetable, (uint64)(mapping), (char*)&dest, sizeof(uint64));
+    if(!flag){
+        uint64 dest = PGROUNDDOWN(GETADDR(get_index(buf)));
+        copyout(myproc()->pagetable, (uint64)(mapping), (char*)&dest, sizeof(uint64));
+    }
     //*mapping = (void*));
     return buf->refcount;
 }
 
 struct ringbuf* resolve_name(const char* name, int flag){
+    acquire(&arrLock);
     //Name must be less than 16 chars and not empty
     int namelen;
     if((namelen = strlen(name)) > 15 || namelen == 0)
@@ -55,7 +61,7 @@ struct ringbuf* resolve_name(const char* name, int flag){
 
     int i; 
     int first_free = 10;
-    acquire(&arrLock);
+    
     for(i = 0; i < MAX_BUFS; i++){
         if(ringbufs[i] == 0){
             if(first_free == 10)
@@ -68,20 +74,21 @@ struct ringbuf* resolve_name(const char* name, int flag){
             } else {
                 ringbufs[i]->refcount--;
             }
-            printf("Ringbuffer found!\n");
+            printf("%s found!\n", ringbufs[i]->name);
             release(&arrLock);
             return ringbufs[i];
         }
     }
-    release(&arrLock);
+    
     //No space for new buffer
-    if(first_free == 10){
+    if(first_free == 10 || flag){
         return 0;
+        release(&arrLock);
     }
-    acquire(&arrLock);
     //open space is unallocated
     if(ringbufs[first_free] == 0){
         if((ringbufs[first_free] = kalloc()) == 0){
+            release(&arrLock);
             return 0;
         }
         ringbufs[first_free]->refcount = 1;
@@ -98,6 +105,7 @@ struct ringbuf* resolve_name(const char* name, int flag){
 
         if(stat){
             resolve_kill(ringbufs[first_free], i);
+            ringbufs[first_free] = 0;
             release(&arrLock);
             return 0;
         }     
@@ -105,13 +113,14 @@ struct ringbuf* resolve_name(const char* name, int flag){
         
         if((ringbufs[first_free]->book = kalloc()) == 0){
             resolve_kill(ringbufs[first_free], i);
+            ringbufs[first_free] = 0;
             release(&arrLock);
             return 0;
         }
 
 
         strncpy(ringbufs[first_free]->name, name, namelen);
-        printf("Ringbuffer allocated!\n");
+        printf("%s allocated!\n", ringbufs[first_free]->name);
         release(&arrLock);
         return ringbufs[first_free];
     }
@@ -120,10 +129,13 @@ struct ringbuf* resolve_name(const char* name, int flag){
 }
 
 int buf_alloc(struct ringbuf* buf, int flag){
+    
+    acquire(&arrLock);
+    int index = get_index(buf);
     struct proc* p = myproc();
     pagetable_t pt = p->pagetable;
-    int index = get_index(buf);
-    acquire(&arrLock);
+    
+    
 
     if(flag == 0){
 
@@ -160,13 +172,23 @@ int buf_alloc(struct ringbuf* buf, int flag){
             release(&arrLock);
             return 0;
         }
+        p->buffers[index] = buf;
     } else {
         int free = buf->refcount == 0;
-        uvmunmap(pt, PGROUNDDOWN(GETADDR(index)), BUF_PAGES*2+1, free);
+        uvmunmap(pt, PGROUNDDOWN(GETADDR(index)), BUF_PAGES*2+1, 0);
+        
 
-        if(free)
+        if(free){
+            for(int i = 0; i < BUF_PAGES; i++){
+                kfree(buf->buf[i]);
+            }
             kfree(buf);
+            ringbufs[index] = 0;
+        }
+        
+        p->buffers[index] = 0;
     }
+    
     release(&arrLock);
     return p->pid;
 }
@@ -179,8 +201,17 @@ void resolve_kill(struct ringbuf* buf, int alloc){
     kfree(buf);
 }
 
+
 void alloc_kill(struct ringbuf* buf, pagetable_t pt, int index, int depth){
+    int exit = 0;
+    if(depth == -1){
+        depth = BUF_PAGES*2+1;
+        exit = 1;
+        acquire(&arrLock);
+    }
     buf->refcount--;
+    //if called by the kernel for an exiting process, set the depth to max
+    
     uvmunmap(pt, PGROUNDDOWN(GETADDR(index)), depth, 0);
     //free the physmem as a separate op to make logic simpler.
     if(buf->refcount == 0){
@@ -190,18 +221,19 @@ void alloc_kill(struct ringbuf* buf, pagetable_t pt, int index, int depth){
 
         kfree(buf->book);
         kfree(buf);
+        ringbufs[index] = 0;
+    }
+    if(exit){
+        release(&arrLock);
     }
 }
 
 int get_index(struct ringbuf* buf){
     int i;
-    acquire(&arrLock);
     for(i = 0; i < MAX_BUFS; i++){
         if(buf == ringbufs[i]){
-            release(&arrLock);
             return i;
         }
     }
-    release(&arrLock);
     return -1;
 }
