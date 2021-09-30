@@ -27,14 +27,16 @@ struct ringbuf {
     void* book;
 };
 
-
+// Creates/Destroys a mapping with ring_buffer named *name*, starting at *mapping*.
+// The *flag* value decides whether to create/destroy mapping. 0 is for creating, 1 for destroying.
+// Returns: Number of processes mapped to ring_buffer *name*, if call successful. Otherwise -1.
 int ring_call(const char* name, int flag, void** mapping){
     if(arrLock.name == 0){
         initlock(&arrLock, "arrLock");
     }
     struct ringbuf* buf = resolve_name(name, flag);
     if(buf == 0){
-        printf("Buffer not allocated, kalloc failure\n");
+        printf("Buffer not allocated.\n");
         return -1;
     }
 
@@ -47,11 +49,16 @@ int ring_call(const char* name, int flag, void** mapping){
     return buf->refcount;
 }
 
+// Creates/Destroys ring_buffer *name* and allocates/deallocates associated pages in kernel.
+// flag=0 for allocation. flag=1 for deallocation.
+// Returns: ringbuffer object
 struct ringbuf* resolve_name(const char* name, int flag){
     //Name must be less than 16 chars and not empty
     int namelen;
-    if((namelen = strlen(name)) > 15 || namelen == 0)
+    if((namelen = strlen(name)) > 15 || namelen == 0) {
+        printf("Name must be less than 16 characters\n");
         return 0;
+    }
 
     int i; 
     int first_free = 10;
@@ -119,6 +126,8 @@ struct ringbuf* resolve_name(const char* name, int flag){
     return 0;
 }
 
+// Creates a mapping into the processes virtual address space or destroys it depending on flag value.
+// Returns: process id if success else 0.
 int buf_alloc(struct ringbuf* buf, int flag){
     struct proc* p = myproc();
     pagetable_t pt = p->pagetable;
@@ -171,6 +180,7 @@ int buf_alloc(struct ringbuf* buf, int flag){
     return p->pid;
 }
 
+// Frees the ringbuffer pages
 void resolve_kill(struct ringbuf* buf, int alloc){
     int i;
     for(i = 0; i < alloc; i++){
@@ -179,6 +189,7 @@ void resolve_kill(struct ringbuf* buf, int alloc){
     kfree(buf);
 }
 
+// Unmaps pages and frees bookkeeping page
 void alloc_kill(struct ringbuf* buf, pagetable_t pt, int index, int depth){
     buf->refcount--;
     uvmunmap(pt, PGROUNDDOWN(GETADDR(index)), depth, 0);
@@ -193,6 +204,7 @@ void alloc_kill(struct ringbuf* buf, pagetable_t pt, int index, int depth){
     }
 }
 
+// Finds buffer in the array of buffers and returns the index.
 int get_index(struct ringbuf* buf){
     int i;
     acquire(&arrLock);
