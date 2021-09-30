@@ -13,7 +13,7 @@
 #define BUF_SIZE BUF_PAGES * PAGE
 #define FOURMEG 4194304
 
-#define MAX (MAXVA - FOURMEG)
+#define MAX (MAXVA - FOURMEG*128)
 #define GETADDR(i) (MAX - (i*(BUF_SIZE + 4096 + FOURMEG)))
 #define GETDUPADDR(i) (MAX - ((i*(BUF_SIZE + 4096 + FOURMEG)) - (BUF_SIZE+4096)))
 
@@ -41,6 +41,9 @@ int ring_call(const char* name, int flag, void** mapping){
     if(buf_alloc(buf, flag) == 0){
         printf("Can't map into processes address space");
     }
+    int dest = PGROUNDDOWN(GETADDR(get_index(buf)));
+    copyout(myproc()->pagetable, (uint64)(mapping), (char*)&dest, sizeof(uint64));
+    //*mapping = (void*));
     return buf->refcount;
 }
 
