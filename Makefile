@@ -127,6 +127,7 @@ UPROGS=\
 	$U/_ls\
 	$U/_mkdir\
 	$U/_pipetest\
+	$U/_ringtest\
 	$U/_rm\
 	$U/_sh\
 	$U/_simple\
