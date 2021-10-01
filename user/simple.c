@@ -34,8 +34,9 @@ int main(){
     if(f == 0){
         void* parent;
         ringbuf("test", 0, &parent);
-        //sleep(15);
-        //ringbuf("test", 1, &parent);
+        sleep(15);
+        printf("%c\n", ((char*)parent)[0]);
+        ringbuf("test", 1, &parent);
         exit(0);
     }
         // void* child;
@@ -48,7 +49,8 @@ int main(){
         //printf("pid = %d\n", f);
         void* parent;
         ringbuf("test", 0, &parent);
-        // printf("%s\n", (char*)parent);
+        ((char*)parent)[0] = 'a';
+        printf("%c\n", parent);
         ringbuf("test", 1, &parent);
         //wait(&stat);
     //}

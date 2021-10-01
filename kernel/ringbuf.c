@@ -50,11 +50,10 @@ int ring_call(const char* name, int flag, void** mapping){
         uint64 dest = PGROUNDDOWN(GETADDR(get_index(buf)));
         copyout(myproc()->pagetable, (uint64)(mapping), (char*)&dest, sizeof(uint64));
     }
-    //*mapping = (void*));
     return buf->refcount;
 }
 
-// Creates/Destroys ring_buffer *name* and allocates/deallocates associated pages in kernel.
+// Creates/Destroys ring_buffer *name* and allocates associated pages in kernel if a new buffer is created
 // flag=0 for allocation. flag=1 for deallocation.
 // Returns: ringbuffer object
 struct ringbuf* resolve_name(const char* name, int flag){
@@ -81,7 +80,7 @@ struct ringbuf* resolve_name(const char* name, int flag){
             } else {
                 ringbufs[i]->refcount--;
             }
-            printf("%s found!\n", ringbufs[i]->name);
+            //printf("%s %d found!\n", ringbufs[i]->name, ringbufs[i]->refcount);
             release(&arrLock);
             return ringbufs[i];
         }
@@ -127,7 +126,7 @@ struct ringbuf* resolve_name(const char* name, int flag){
 
 
         strncpy(ringbufs[first_free]->name, name, namelen);
-        printf("%s allocated!\n", ringbufs[first_free]->name);
+        //printf("%s allocated!\n", ringbufs[first_free]->name);
         release(&arrLock);
         return ringbufs[first_free];
     }
@@ -144,8 +143,6 @@ int buf_alloc(struct ringbuf* buf, int flag){
     struct proc* p = myproc();
     pagetable_t pt = p->pagetable;
     
-    
-
     if(flag == 0){
 
         int i,j, stat;
@@ -185,8 +182,7 @@ int buf_alloc(struct ringbuf* buf, int flag){
     } else {
         int free = buf->refcount == 0;
         uvmunmap(pt, PGROUNDDOWN(GETADDR(index)), BUF_PAGES*2+1, 0);
-        
-
+    
         if(free){
             for(int i = 0; i < BUF_PAGES; i++){
                 kfree(buf->buf[i]);
@@ -202,7 +198,7 @@ int buf_alloc(struct ringbuf* buf, int flag){
     return p->pid;
 }
 
-// Frees the ringbuffer pages
+// Frees the ringbuffer pages if there was an issue kallocing them
 void resolve_kill(struct ringbuf* buf, int alloc){
     int i;
     for(i = 0; i < alloc; i++){
@@ -212,15 +208,19 @@ void resolve_kill(struct ringbuf* buf, int alloc){
 }
 
 // Unmaps pages and frees bookkeeping page
+// This is called both in the event of a mapping error, or by exit()
+// if a process exited without closing a buffer properly
 void alloc_kill(struct ringbuf* buf, pagetable_t pt, int index, int depth){
     int exit = 0;
+
+    //called by exit()
     if(depth == -1){
         depth = BUF_PAGES*2+1;
         exit = 1;
+        //locked is needed externally here, in the standard case, the lock is held by alloc_buf
         acquire(&arrLock);
     }
     buf->refcount--;
-    //if called by the kernel for an exiting process, set the depth to max
     
     uvmunmap(pt, PGROUNDDOWN(GETADDR(index)), depth, 0);
     //free the physmem as a separate op to make logic simpler.
