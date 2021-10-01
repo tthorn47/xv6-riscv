@@ -6,6 +6,9 @@ struct user_ring_buf {
     int exists;
 };
 
+int ringbuf_attach(char* name);
+void release(int);
+
 void ringbuf_start_read(int ring_desc, char **addr, int *bytes);
 void ringbuf_finish_read(int ring_desc, int bytes);
 

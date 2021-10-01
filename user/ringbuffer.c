@@ -1,7 +1,13 @@
-#include "user.h"
 #include "ringbuffer.h"
 
-//
+int ringbuf_attach(char* name) {
+
+}
+
+void release(int) {
+
+}
+
 void ringbuf_start_read(int ring_desc, char **addr, int *bytes) {
 
 }
