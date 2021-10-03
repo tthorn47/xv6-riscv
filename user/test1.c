@@ -13,7 +13,7 @@ int main(){
         ringbuf(name,1,&p);
         exit(1);
     }
-    printf("%s\n",p);
+
     ringbuf(name,1,&p);
 
     exit(0);

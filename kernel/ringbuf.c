@@ -67,7 +67,7 @@ struct ringbuf* resolve_name(const char* name, int flag){
 
     int i; 
     int first_free = 10;
-    
+
     for(i = 0; i < MAX_BUFS; i++){
         if(ringbufs[i] == 0){
             if(first_free == 10)
@@ -106,7 +106,7 @@ struct ringbuf* resolve_name(const char* name, int flag){
             if((ringbufs[first_free]->buf[i] = kalloc()) == 0){
                 stat = 1;
                 break;
-            }             
+            }
         } 
 
         if(stat){
