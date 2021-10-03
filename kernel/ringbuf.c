@@ -27,6 +27,10 @@ struct ringbuf {
     void* book;
 };
 
+struct book {
+    ulong read_done, write_done;
+};
+
 // Creates/Destroys a mapping with ring_buffer named *name*, starting at *mapping*.
 // The *flag* value decides whether to create/destroy mapping. 0 is for creating, 1 for destroying.
 // Returns: Number of processes mapped to ring_buffer *name*, if call successful. Otherwise -1.
