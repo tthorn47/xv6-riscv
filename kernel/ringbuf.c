@@ -28,7 +28,7 @@ struct ringbuf {
 };
 
 struct book {
-    ulong read_done, write_done;
+    uint64 read_done, write_done;
 };
 
 // Creates/Destroys a mapping with ring_buffer named *name*, starting at *mapping*.
@@ -186,16 +186,16 @@ int buf_alloc(struct ringbuf* buf, int flag){
     } else {
         int free = buf->refcount == 0;
         uvmunmap(pt, PGROUNDDOWN(GETADDR(index)), BUF_PAGES*2+1, 0);
-    
+        printf("unmapped\n");
         if(free){
             for(int i = 0; i < BUF_PAGES; i++){
                 kfree(buf->buf[i]);
             }
             kfree(buf);
             ringbufs[index] = 0;
-        }
-        
-        p->buffers[index] = 0;
+            printf("deallocated\n");
+        }    
+        p->buffers[index] = 0;     
     }
     
     release(&arrLock);
