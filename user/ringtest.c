@@ -1,5 +1,5 @@
 #include "kernel/types.h"
-#include "ringbuffer.h"
+#include "ringlib.h"
 #include "xorshift.c"
 #include "user.h"
 #define TEN_MEG (1024 * 1024 * 10)

@@ -13,11 +13,12 @@
 #define FOURMEG (4 * 1024 * 1024)
 #define NAMELEN 16
 //Starting from the top of the virtual address space, go 512MB down
-//Should completely rule out interference with kernel addres space (trap PGSIZE etc.)
+//Should completely rule out interference with kernel addres space (trap page etc.)
 #define MAX (MAXVA - FOURMEG*128)
 //Each Buffer is stored at a constant location in the memory that descends from MAX
 //with FOURMEG of padding between each buffer. This is makes excessively large buffers
-//and issue, but an upper limit on size isn't in the spec, so I'm setting one here.
+//an issue, but an upper limit on size isn't in the spec, so I'm setting one here.
+//MAX - 512MB > (10 * BUF_SIZE + PGSIZE + FOURMEG)
 #define GETADDR(i) PGROUNDDOWN((MAX - (i*(BUF_SIZE + PGSIZE + FOURMEG))))
 
 struct spinlock arrLock;
@@ -30,10 +31,6 @@ struct ringbuf {
     void* book;
 };
 
-struct book {
-    uint64 read_done, write_done;
-};
-
 // Creates/Destroys a mapping with ring_buffer named *name*, starting at *mapping*.
 // The *flag* value decides whether to create/destroy mapping. 0 is for creating, 1 for destroying.
 // Returns: Number of processes mapped to ring_buffer *name*, if call successful. Otherwise -1.
@@ -42,7 +39,9 @@ int ring_call(const char* name, int flag, void** mapping){
     if(arrLock.name == 0){
         initlock(&arrLock, "arrLock");
     }
+
     acquire(&arrLock);
+
     struct ringbuf* buf = resolve_name(name, flag);
     if(buf == 0){
         printf("Buffer not allocated.\n");
@@ -63,15 +62,12 @@ int ring_call(const char* name, int flag, void** mapping){
 
 // Creates/Destroys ring_buffer *name* and allocates associated pages in kernel if a new buffer is created
 // flag=0 for allocation. flag=1 for deallocation.
-// Returns: ringbuffer object
+// Returns: ringbuffer object or null on error
 struct ringbuf* resolve_name(const char* name, int flag){
     struct proc* p = myproc();
     
-    //Name must be less than 16 chars and not empty
-    int namelen;
-    if((namelen = strlen(name)) > 15 || namelen == 0) {
+    if((int namelen = strlen(name)) > 15 || namelen == 0) {
         printf("Name must be less than 16 characters and non-empty\n");
-        
         return 0;
     }
 
@@ -90,7 +86,6 @@ struct ringbuf* resolve_name(const char* name, int flag){
             } else {
                 ringbufs[i]->refcount++;
             }
-            printf("proc: %d | %s %d found!\n",p->pid, ringbufs[i]->name, ringbufs[i]->refcount);
             
             return ringbufs[i];
         }
@@ -98,13 +93,12 @@ struct ringbuf* resolve_name(const char* name, int flag){
     
     //No space for new buffer
     if(first_free == 10 || flag){
-        return 0;
-        
+        return 0;    
     }
+
     //map the new buffer at index "first_free"
     if(ringbufs[first_free] == 0){
         if((ringbufs[first_free] = kalloc()) == 0){
-            
             return 0;
         }
         
@@ -121,24 +115,21 @@ struct ringbuf* resolve_name(const char* name, int flag){
 
         if(stat){
             resolve_kill(ringbufs[first_free], i);
-            ringbufs[first_free] = 0;
-            
+            ringbufs[first_free] = 0;     
             return 0;
         }     
         
         
         if((ringbufs[first_free]->book = kalloc()) == 0){
             resolve_kill(ringbufs[first_free], i);
-            ringbufs[first_free] = 0;
-            
+            ringbufs[first_free] = 0;    
             return 0;
         }
 
 
         strncpy(ringbufs[first_free]->name, name, namelen);
         ringbufs[first_free]->refcount = 1;
-        //printf("%s allocated!\n", ringbufs[first_free]->name);
-        
+        //printf("%s allocated!\n", ringbufs[first_free]->name);       
         return ringbufs[first_free];
     }
     
@@ -146,10 +137,11 @@ struct ringbuf* resolve_name(const char* name, int flag){
 }
 
 // Creates a mapping into the processes virtual address space or destroys it depending on flag value.
+// If the refcount of the buffer is zero when this method is called, the phymem will be unmapped and 
+// the entry will be marked as empty from the side of Kernel bookkeeping.
 // Returns: process id if success else 0.
 int buf_alloc(struct ringbuf* buf, int flag){
-    
-    
+      
     int index = get_index(buf);
     struct proc* p = myproc();
     pagetable_t pt = p->pagetable;
@@ -163,7 +155,7 @@ int buf_alloc(struct ringbuf* buf, int flag){
             if((stat = mappages(pt, (GETADDR(index)+(i*PGSIZE)), PGSIZE, (uint64)buf->buf[i], PTE_U | PTE_W | PTE_R | PTE_X)) < 0)
                 break;
         }
-        //printf("buf0 = %p\n", buf->buf[0]);
+
         //rollback for first mapping if failure occurred
         if(stat < 0){
             alloc_kill(buf, pt, index, i);
@@ -177,6 +169,7 @@ int buf_alloc(struct ringbuf* buf, int flag){
                 break;
         }
 
+        //rollback if second mapping failed
         if(stat < 0){
             alloc_kill(buf, pt, index, i+j);
             
@@ -186,14 +179,14 @@ int buf_alloc(struct ringbuf* buf, int flag){
         stat = mappages(pt, GETADDR(index)+(BUF_SIZE*2), PGSIZE, (uint64)buf->book, PTE_U | PTE_W | PTE_R | PTE_X);
         
         if(stat < 0){
-            alloc_kill(buf, pt, index, BUF_PAGES);
-            
+            alloc_kill(buf, pt, index, BUF_PAGES);          
             return 0;
         }
         p->buffers[index] = buf;
     } else {
+
         int free = buf->refcount == 0;
-        printf("proc: %d | unmapped %s free = %d\n", p->pid, buf->name, free);
+        //printf("proc: %d | unmapped %s free = %d\n", p->pid, buf->name, free);
         uvmunmap(pt, GETADDR(index), BUF_PAGES*2+1, 0);
         if(free){
             for(int i = 0; i < BUF_PAGES; i++){
@@ -201,11 +194,10 @@ int buf_alloc(struct ringbuf* buf, int flag){
             }
             kfree(buf);
             ringbufs[index] = 0;
-            printf("deallocated\n");
+            //printf("deallocated\n");
         }    
         p->buffers[index] = 0;     
     }
-    
     
     return p->pid;
 }
@@ -229,9 +221,10 @@ void alloc_kill(struct ringbuf* buf, pagetable_t pt, int index, int depth){
     if(depth == -1){
         depth = BUF_PAGES*2+1;
         exit = 1;
-        //locked is needed externally here, in the standard case, the lock is held by alloc_buf
+        //locked is needed externally here, in the standard case, the lock is held by ring_call
         acquire(&arrLock);
     }
+    //because this method is called when assigning to the user AS, the mapping might be valid elsewhere
     buf->refcount--;
     uvmunmap(pt, GETADDR(index), depth, 0);
     //free the physmem as a separate op to make logic simpler.
