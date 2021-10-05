@@ -8,21 +8,24 @@
 #include "defs.h"
 
 #define BUF_PAGES 16
-#define PAGE 4096
 #define MAX_BUFS 10
-#define BUF_SIZE BUF_PAGES * PAGE
-#define FOURMEG 4194304
-
+#define BUF_SIZE (BUF_PAGES * PGSIZE)
+#define FOURMEG (4 * 1024 * 1024)
+#define NAMELEN 16
+//Starting from the top of the virtual address space, go 512MB down
+//Should completely rule out interference with kernel addres space (trap PGSIZE etc.)
 #define MAX (MAXVA - FOURMEG*128)
-#define GETADDR(i) (MAX - (i*(BUF_SIZE + 4096 + FOURMEG)))
-#define GETDUPADDR(i) (MAX - ((i*(BUF_SIZE + 4096 + FOURMEG)) - (BUF_SIZE+4096)))
+//Each Buffer is stored at a constant location in the memory that descends from MAX
+//with FOURMEG of padding between each buffer. This is makes excessively large buffers
+//and issue, but an upper limit on size isn't in the spec, so I'm setting one here.
+#define GETADDR(i) PGROUNDDOWN((MAX - (i*(BUF_SIZE + PGSIZE + FOURMEG))))
 
 struct spinlock arrLock;
 
 struct ringbuf* ringbufs[MAX_BUFS];
 struct ringbuf {
     int refcount; // 0 for empty
-    char name[16];
+    char name[NAMELEN];
     void* buf[BUF_PAGES];
     void* book;
 };
@@ -35,11 +38,11 @@ struct book {
 // The *flag* value decides whether to create/destroy mapping. 0 is for creating, 1 for destroying.
 // Returns: Number of processes mapped to ring_buffer *name*, if call successful. Otherwise -1.
 int ring_call(const char* name, int flag, void** mapping){
-
+    
     if(arrLock.name == 0){
         initlock(&arrLock, "arrLock");
     }
-
+    acquire(&arrLock);
     struct ringbuf* buf = resolve_name(name, flag);
     if(buf == 0){
         printf("Buffer not allocated.\n");
@@ -47,13 +50,14 @@ int ring_call(const char* name, int flag, void** mapping){
     }
 
     if(buf_alloc(buf, flag) == 0){
-        printf("Can't map into processes address space");
+        printf("Can't map into process address space");
         return -1;
     }
     if(!flag){
-        uint64 dest = PGROUNDDOWN(GETADDR(get_index(buf)));
+        uint64 dest = GETADDR(get_index(buf));
         copyout(myproc()->pagetable, (uint64)(mapping), (char*)&dest, sizeof(uint64));
     }
+    release(&arrLock);
     return buf->refcount;
 }
 
@@ -61,11 +65,13 @@ int ring_call(const char* name, int flag, void** mapping){
 // flag=0 for allocation. flag=1 for deallocation.
 // Returns: ringbuffer object
 struct ringbuf* resolve_name(const char* name, int flag){
-    acquire(&arrLock);
+    struct proc* p = myproc();
+    
     //Name must be less than 16 chars and not empty
     int namelen;
     if((namelen = strlen(name)) > 15 || namelen == 0) {
-        printf("Name must be less than 16 characters\n");
+        printf("Name must be less than 16 characters and non-empty\n");
+        
         return 0;
     }
 
@@ -79,13 +85,13 @@ struct ringbuf* resolve_name(const char* name, int flag){
             continue;
         }
         if(strncmp(ringbufs[i]->name, name, namelen) == 0){
-            if(!flag){
-                ringbufs[i]->refcount++;
-            } else {
+            if(flag){
                 ringbufs[i]->refcount--;
+            } else {
+                ringbufs[i]->refcount++;
             }
-            //printf("%s %d found!\n", ringbufs[i]->name, ringbufs[i]->refcount);
-            release(&arrLock);
+            printf("proc: %d | %s %d found!\n",p->pid, ringbufs[i]->name, ringbufs[i]->refcount);
+            
             return ringbufs[i];
         }
     }
@@ -93,15 +99,15 @@ struct ringbuf* resolve_name(const char* name, int flag){
     //No space for new buffer
     if(first_free == 10 || flag){
         return 0;
-        release(&arrLock);
+        
     }
-    //open space is unallocated
+    //map the new buffer at index "first_free"
     if(ringbufs[first_free] == 0){
         if((ringbufs[first_free] = kalloc()) == 0){
-            release(&arrLock);
+            
             return 0;
         }
-        ringbufs[first_free]->refcount = 1;
+        
 
         int i;
         int stat = 0;
@@ -116,7 +122,7 @@ struct ringbuf* resolve_name(const char* name, int flag){
         if(stat){
             resolve_kill(ringbufs[first_free], i);
             ringbufs[first_free] = 0;
-            release(&arrLock);
+            
             return 0;
         }     
         
@@ -124,17 +130,18 @@ struct ringbuf* resolve_name(const char* name, int flag){
         if((ringbufs[first_free]->book = kalloc()) == 0){
             resolve_kill(ringbufs[first_free], i);
             ringbufs[first_free] = 0;
-            release(&arrLock);
+            
             return 0;
         }
 
 
         strncpy(ringbufs[first_free]->name, name, namelen);
+        ringbufs[first_free]->refcount = 1;
         //printf("%s allocated!\n", ringbufs[first_free]->name);
-        release(&arrLock);
+        
         return ringbufs[first_free];
     }
-    release(&arrLock);
+    
     return 0;
 }
 
@@ -142,51 +149,52 @@ struct ringbuf* resolve_name(const char* name, int flag){
 // Returns: process id if success else 0.
 int buf_alloc(struct ringbuf* buf, int flag){
     
-    acquire(&arrLock);
+    
     int index = get_index(buf);
     struct proc* p = myproc();
     pagetable_t pt = p->pagetable;
     
-    if(flag == 0){
+    //mapping
+    if(!flag){
 
         int i,j, stat;
         for (i = 0; i < BUF_PAGES; i++)
         {
-            if((stat = mappages(pt, PGROUNDDOWN(GETADDR(index)+(i*PAGE)), PAGE, (uint64)buf->buf[i], PTE_U | PTE_W | PTE_R | PTE_X)) < 0)
+            if((stat = mappages(pt, (GETADDR(index)+(i*PGSIZE)), PGSIZE, (uint64)buf->buf[i], PTE_U | PTE_W | PTE_R | PTE_X)) < 0)
                 break;
         }
-
+        //printf("buf0 = %p\n", buf->buf[0]);
         //rollback for first mapping if failure occurred
         if(stat < 0){
             alloc_kill(buf, pt, index, i);
-            release(&arrLock);
+            
             return 0;
         }
         
         for (j = 0; j < BUF_PAGES; j++)
         {
-            if((stat = mappages(pt, PGROUNDDOWN(GETADDR(index)+(j*PAGE))+BUF_SIZE, PAGE, (uint64)buf->buf[j], PTE_U | PTE_W | PTE_R | PTE_X)) < 0)
+            if((stat = mappages(pt, (GETADDR(index)+(j*PGSIZE))+BUF_SIZE, PGSIZE, (uint64)buf->buf[j], PTE_U | PTE_W | PTE_R | PTE_X)) < 0)
                 break;
         }
 
         if(stat < 0){
             alloc_kill(buf, pt, index, i+j);
-            release(&arrLock);
+            
             return 0;
         }
 
-        stat = mappages(pt, PGROUNDDOWN(GETADDR(index))+(BUF_SIZE*2), 4096, (uint64)buf->book, PTE_U | PTE_W | PTE_R | PTE_X);
+        stat = mappages(pt, GETADDR(index)+(BUF_SIZE*2), PGSIZE, (uint64)buf->book, PTE_U | PTE_W | PTE_R | PTE_X);
         
         if(stat < 0){
             alloc_kill(buf, pt, index, BUF_PAGES);
-            release(&arrLock);
+            
             return 0;
         }
         p->buffers[index] = buf;
     } else {
         int free = buf->refcount == 0;
-        uvmunmap(pt, PGROUNDDOWN(GETADDR(index)), BUF_PAGES*2+1, 0);
-        printf("unmapped\n");
+        printf("proc: %d | unmapped %s free = %d\n", p->pid, buf->name, free);
+        uvmunmap(pt, GETADDR(index), BUF_PAGES*2+1, 0);
         if(free){
             for(int i = 0; i < BUF_PAGES; i++){
                 kfree(buf->buf[i]);
@@ -198,7 +206,7 @@ int buf_alloc(struct ringbuf* buf, int flag){
         p->buffers[index] = 0;     
     }
     
-    release(&arrLock);
+    
     return p->pid;
 }
 
@@ -211,7 +219,7 @@ void resolve_kill(struct ringbuf* buf, int alloc){
     kfree(buf);
 }
 
-// Unmaps pages and frees bookkeeping page
+// Unmaps pages and frees bookkeeping PGSIZE
 // This is called both in the event of a mapping error, or by exit()
 // if a process exited without closing a buffer properly
 void alloc_kill(struct ringbuf* buf, pagetable_t pt, int index, int depth){
@@ -225,8 +233,7 @@ void alloc_kill(struct ringbuf* buf, pagetable_t pt, int index, int depth){
         acquire(&arrLock);
     }
     buf->refcount--;
-    
-    uvmunmap(pt, PGROUNDDOWN(GETADDR(index)), depth, 0);
+    uvmunmap(pt, GETADDR(index), depth, 0);
     //free the physmem as a separate op to make logic simpler.
     if(buf->refcount == 0){
         int i;

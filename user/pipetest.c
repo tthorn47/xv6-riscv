@@ -2,7 +2,7 @@
 #include "user.h"
 
 #define TEN_MEG 1024 * 1024 * 10
-#define TM_INT TEN_MEG/4
+#define TM_INT (TEN_MEG/4)
 
 int main(){
     int k, i;
