@@ -2,7 +2,7 @@
 #include "kernel/types.h"
 #define BUF_PAGES 16
 #define PAGE 4096
-#define BUF_SIZE BUF_PAGES * PAGE
+#define BUF_SIZE (BUF_PAGES * PAGE)
 #define MAX_BUFS 10
 
 struct book {
@@ -25,15 +25,15 @@ int ringbuf_attach(char* name) {
     if((ringbuf(name, 0, &addr)) < 0){
         return -1;
     }else{
-            
+
             struct book* the_book = (struct book*)(addr+(BUF_SIZE*2));
             int i = get_index(the_book);
-            if(i == -1){  
-                i = get_slot();             
+            if(i == -1){
+                i = get_slot();
                 __atomic_store_8(&the_book->top, (uint64)addr, __ATOMIC_SEQ_CST);
                 __atomic_store_8(&the_book->write, (uint64)addr, __ATOMIC_SEQ_CST);
                 __atomic_store_8(&the_book->read, (uint64)addr, __ATOMIC_SEQ_CST);
-                strcpy(&the_book->name[0], name);                     
+                strcpy(&the_book->name[0], name);
                 __atomic_store_8(&books[i], (uint64)the_book, __ATOMIC_SEQ_CST);
             }
             return i;
@@ -43,11 +43,11 @@ int ringbuf_attach(char* name) {
 // Used to detach from a ring buffer with name and position buffer_id in array of descriptors.
 void ringbuf_release(int id) {
     struct book* the_book = find_book(id);
-    
+
     if(the_book == 0)
         return;
 
-    ringbuf(the_book->name, 1, &the_book->top);   
+    ringbuf(the_book->name, 1, &the_book->top);
 }
 
 int get_slot(){
@@ -74,22 +74,34 @@ struct book* find_book(int id){
     {
         return books[id];
     }
-    
+
     return 0;
 }
 
-// // 1) Assign start position for reading to addr.
-// // 2) Calculate number of bytes available for reading and assign to bytes.
-// //     write_ptr-read_ptr (Assuming write pointer can never be less than read pointer as
-// //     we will always pull both pointers back to the beginning if either goes beyond the buffer_size from start.
-// //     Also the difference cannot be greater than buffer_size)
-// void ringbuf_start_read(int ring_desc, char **addr, int *bytes) {
+ // 1) Assign start position for reading to addr.
+ // 2) Calculate number of bytes available for reading and assign to bytes.
+ //     (write_ptr-read_ptr) % BUF_SIZE
 
-// }
+void ringbuf_start_read(int ring_desc, char **addr, int *bytes) {
+    struct book* reader = find_book(ring_desc);
+//     printf("%p\n", reader->read);
+//     printf("%s\n", reader->read);
+//     printf("%d\n", (int)BUF_SIZE);
 
-// void ringbuf_finish_read(int ring_desc, int bytes) {
+    *addr = reader->read;
+    *bytes = (reader->write-reader->read) % BUF_SIZE;
 
-// }
+    return;
+}
+
+// 1) Move read head forward by *bytes*.
+void ringbuf_finish_read(int ring_desc, int bytes) {
+    struct book* reader = find_book(ring_desc);
+    reader->read += bytes;
+
+//    printf("%p\n", reader->read);
+//    printf("%p\n", reader->write);
+}
 
 // // 1) Assign start position for writing to addr.
 // // 2) Calculate number of bytes available for writing and assign to bytes.
