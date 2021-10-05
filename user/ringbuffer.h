@@ -119,17 +119,6 @@ void ringbuf_finish_read(int ring_desc, int bytes) {
 //    printf("%p\n", reader->write);
 }
 
-// // 1) Assign start position for writing to addr.
-// // 2) Calculate number of bytes available for writing and assign to bytes.
-// //     BUF_SIZE-(write_ptr-read_ptr)
-// void ringbuf_start_write(int ring_desc, char **addr, int *bytes) {
-
-void ringbuf_finish_read(int ring_desc, int bytes) {
-    
-    struct book* the_book = find_book(ring_desc);
-    __atomic_store_8(&the_book->nRead, (uint64)(the_book->nRead + bytes), __ATOMIC_SEQ_CST);
-    __atomic_store_8(&the_book->read, (uint64)(the_book->top + (the_book->nRead % BUF_SIZE)), __ATOMIC_SEQ_CST);
-}
 
 // 1) Assign start position for writing to addr.
 // 2) Calculate number of bytes available for writing and assign to bytes.
