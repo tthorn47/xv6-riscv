@@ -30,31 +30,31 @@ int ringbuf_attach(char* name) {
         return -1;
     }else{
 
-            struct book* the_book = (struct book*)(addr+(BUF_SIZE*2));
-            int i = get_index(the_book);
-            if(i != -1){
-                return i;
-            }
-            i = get_slot();
-            if(strcmp(the_book->name, name) != 0){                            
-                __atomic_store_8(&the_book->top, (uint64)addr, __ATOMIC_SEQ_CST);
-                __atomic_store_8(&the_book->write, (uint64)addr, __ATOMIC_SEQ_CST);
-                __atomic_store_8(&the_book->read, (uint64)addr, __ATOMIC_SEQ_CST);
-                __atomic_store_8(&the_book->nRead, (uint64)0, __ATOMIC_SEQ_CST);
-                __atomic_store_8(&the_book->nWrite, (uint64)0, __ATOMIC_SEQ_CST);
-                strcpy(&the_book->name[0], name);                              
-            }else{
-                printf("found\n");
-            }
-            __atomic_store_8(&books[i], (uint64)the_book, __ATOMIC_SEQ_CST);
+        struct book* the_book = (struct book*)(addr+(BUF_SIZE*2));
+        int i = get_index(the_book);
+        if(i != -1){
             return i;
+        }
+        i = get_slot();
+        if(strcmp(the_book->name, name) != 0){
+            __atomic_store_8(&the_book->top, (uint64)addr, __ATOMIC_SEQ_CST);
+            __atomic_store_8(&the_book->write, (uint64)addr, __ATOMIC_SEQ_CST);
+            __atomic_store_8(&the_book->read, (uint64)addr, __ATOMIC_SEQ_CST);
+            __atomic_store_8(&the_book->nRead, (uint64)0, __ATOMIC_SEQ_CST);
+            __atomic_store_8(&the_book->nWrite, (uint64)0, __ATOMIC_SEQ_CST);
+            strcpy(&the_book->name[0], name);
+        }else{
+            printf("found\n");
+        }
+        __atomic_store_8(&books[i], (uint64)the_book, __ATOMIC_SEQ_CST);
+        return i;
     }
 }
 
 // Used to detach from a ring buffer with name and position buffer_id in array of descriptors.
 void ringbuf_release(int id) {
     struct book* the_book = find_book(id);
-    
+
     if(the_book == 0){
         printf("release: Buffer not found");
         return;
@@ -94,31 +94,27 @@ struct book* find_book(int id){
     return 0;
 }
 
- // 1) Assign start position for reading to addr.
- // 2) Calculate number of bytes available for reading and assign to bytes.
- //     (write_ptr-read_ptr) % BUF_SIZE
-
+// 1) Assign start position for reading to addr.
+// 2) Calculate number of bytes available for reading and assign to bytes.
 void ringbuf_start_read(int ring_desc, char **addr, int *bytes) {
-    struct book* reader = find_book(ring_desc);
-//     printf("%p\n", reader->read);
-//     printf("%s\n", reader->read);
-//     printf("%d\n", (int)BUF_SIZE);
+    struct book* the_book = find_book(ring_desc);
 
-    *addr = reader->read;
-    *bytes = (reader->write-reader->read) % BUF_SIZE;
-
-    return;
+    //set the *addr to the start of write book->write
+    *addr = (char*)__atomic_load_8(&the_book->read, __ATOMIC_SEQ_CST);
+    //do the calculation for the available space
+    if(__atomic_load_8(&the_book->nWrite, __ATOMIC_SEQ_CST) > __atomic_load_8(&the_book->nRead, __ATOMIC_SEQ_CST))
+        *bytes = __atomic_load_8(&the_book->nWrite, __ATOMIC_SEQ_CST) - __atomic_load_8(&the_book->nRead, __ATOMIC_SEQ_CST);
+    else
+        *bytes = 0;
 }
 
-// 1) Move read head forward by *bytes*.
+// Move the read head by *bytes*
 void ringbuf_finish_read(int ring_desc, int bytes) {
-    struct book* reader = find_book(ring_desc);
-    reader->read += bytes;
 
-//    printf("%p\n", reader->read);
-//    printf("%p\n", reader->write);
+    struct book* the_book = find_book(ring_desc);
+    __atomic_store_8(&the_book->nRead, (uint64)(the_book->nRead + bytes), __ATOMIC_SEQ_CST);
+    __atomic_store_8(&the_book->read, (uint64)(the_book->top + (the_book->nRead % BUF_SIZE)), __ATOMIC_SEQ_CST);
 }
-
 
 // 1) Assign start position for writing to addr.
 // 2) Calculate number of bytes available for writing and assign to bytes.
@@ -135,6 +131,7 @@ void ringbuf_start_write(int ring_desc, char **addr, int *bytes) {
         *bytes = BUF_SIZE - (__atomic_load_8(&the_book->nWrite, __ATOMIC_SEQ_CST) - __atomic_load_8(&the_book->nRead, __ATOMIC_SEQ_CST));
 }
 
+// Move the write head by *bytes*
 void ringbuf_finish_write(int ring_desc, int bytes){
     struct book* the_book = find_book(ring_desc);
     __atomic_store_8(&the_book->nWrite, (uint64)(the_book->nWrite + bytes), __ATOMIC_SEQ_CST);
