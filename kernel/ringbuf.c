@@ -1,6 +1,5 @@
 #include "types.h"
 #include "param.h"
-#include "memlayout.h"
 #include "riscv.h"
 #include "spinlock.h"
 #include "proc.h"
@@ -18,8 +17,8 @@
 //Each Buffer is stored at a constant location in the memory that descends from MAX
 //with FOURMEG of padding between each buffer. This is makes excessively large buffers
 //an issue, but an upper limit on size isn't in the spec, so I'm setting one here.
-//MAX - 512MB > (10 * BUF_SIZE + PGSIZE + FOURMEG)
-#define GETADDR(i) PGROUNDDOWN((MAX - (i*(BUF_SIZE + PGSIZE + FOURMEG))))
+//MAX - (512MB(kernelmem) + 128MB (usermem)) > (10 * ((BUF_SIZE*2) + PGSIZE + FOURMEG))
+#define GETADDR(i) PGROUNDDOWN((MAX - (i*((BUF_SIZE*2) + PGSIZE + FOURMEG))))
 
 struct spinlock arrLock;
 
@@ -33,7 +32,7 @@ struct ringbuf {
 
 // Creates/Destroys a mapping with ring_buffer named *name*, starting at *mapping*.
 // The *flag* value decides whether to create/destroy mapping. 0 is for creating, 1 for destroying.
-// Returns: Number of processes mapped to ring_buffer *name*, if call successful. Otherwise -1.
+// Returns: Number of processes mapped to ring_buffer *name*, if call is successful. Otherwise -1.
 int ring_call(const char* name, int flag, void** mapping){
     
     if(arrLock.name == 0){
@@ -45,11 +44,13 @@ int ring_call(const char* name, int flag, void** mapping){
     struct ringbuf* buf = resolve_name(name, flag);
     if(buf == 0){
         printf("Buffer not allocated.\n");
+        release(&arrLock);
         return -1;
     }
 
-    if(buf_alloc(buf, flag) == 0){
-        printf("Can't map into process address space");
+    if(map_buffer(buf, flag) == 0){
+        printf("Can't map into process address space\n");
+        release(&arrLock);
         return -1;
     }
     if(!flag){
@@ -62,11 +63,10 @@ int ring_call(const char* name, int flag, void** mapping){
 
 // Creates/Destroys ring_buffer *name* and allocates associated pages in kernel if a new buffer is created
 // flag=0 for allocation. flag=1 for deallocation.
-// Returns: ringbuffer object or null on error
+// Returns: ringbuffer pointer or null on error
 struct ringbuf* resolve_name(const char* name, int flag){
-    struct proc* p = myproc();
-    
-    if((int namelen = strlen(name)) > 15 || namelen == 0) {
+    int namelen = 0;
+    if((namelen = strlen(name)) > 15 || namelen == 0) {
         printf("Name must be less than 16 characters and non-empty\n");
         return 0;
     }
@@ -91,14 +91,20 @@ struct ringbuf* resolve_name(const char* name, int flag){
         }
     }
     
-    //No space for new buffer
+    //No space for new buffer or dealloc one that doens't exist
     if(first_free == 10 || flag){
+        if(flag){
+            printf("ringbuf: freeing non-existant buffer!\n");
+        } else {
+            printf("ringbuf: buffer limit reached\n");
+        }
         return 0;    
     }
 
     //map the new buffer at index "first_free"
     if(ringbufs[first_free] == 0){
         if((ringbufs[first_free] = kalloc()) == 0){
+            printf("ringbuf: kalloc failed!\n");
             return 0;
         }
         
@@ -108,6 +114,7 @@ struct ringbuf* resolve_name(const char* name, int flag){
         for (i = 0; i < BUF_PAGES; i++)
         {
             if((ringbufs[first_free]->buf[i] = kalloc()) == 0){
+                printf("ringbuf: kalloc failed!\n");
                 stat = 1;
                 break;
             }
@@ -121,6 +128,7 @@ struct ringbuf* resolve_name(const char* name, int flag){
         
         
         if((ringbufs[first_free]->book = kalloc()) == 0){
+            printf("ringbuf: kalloc failed!\n");
             resolve_kill(ringbufs[first_free], i);
             ringbufs[first_free] = 0;    
             return 0;
@@ -140,7 +148,7 @@ struct ringbuf* resolve_name(const char* name, int flag){
 // If the refcount of the buffer is zero when this method is called, the phymem will be unmapped and 
 // the entry will be marked as empty from the side of Kernel bookkeeping.
 // Returns: process id if success else 0.
-int buf_alloc(struct ringbuf* buf, int flag){
+int map_buffer(struct ringbuf* buf, int flag){
       
     int index = get_index(buf);
     struct proc* p = myproc();
@@ -158,6 +166,7 @@ int buf_alloc(struct ringbuf* buf, int flag){
 
         //rollback for first mapping if failure occurred
         if(stat < 0){
+            printf("ringbuf: mapping to userspace failed!\n");
             alloc_kill(buf, pt, index, i);
             
             return 0;
@@ -172,17 +181,19 @@ int buf_alloc(struct ringbuf* buf, int flag){
         //rollback if second mapping failed
         if(stat < 0){
             alloc_kill(buf, pt, index, i+j);
-            
+            printf("ringbuf: mapping to userspace failed!\n");
             return 0;
         }
 
         stat = mappages(pt, GETADDR(index)+(BUF_SIZE*2), PGSIZE, (uint64)buf->book, PTE_U | PTE_W | PTE_R | PTE_X);
         
         if(stat < 0){
+            printf("ringbuf: mapping to userspace failed!\n");
             alloc_kill(buf, pt, index, BUF_PAGES);          
             return 0;
         }
         p->buffers[index] = buf;
+
     } else {
 
         int free = buf->refcount == 0;
@@ -211,14 +222,15 @@ void resolve_kill(struct ringbuf* buf, int alloc){
     kfree(buf);
 }
 
-// Unmaps pages and frees bookkeeping PGSIZE
+// Unmaps and frees buffer pages and bookkeeping page 
 // This is called both in the event of a mapping error, or by exit()
 // if a process exited without closing a buffer properly
 void alloc_kill(struct ringbuf* buf, pagetable_t pt, int index, int depth){
     int exit = 0;
 
-    //called by exit()
+    //called by exit(), flush everything
     if(depth == -1){
+        printf("ringbuf: warning: process exited without releasing ringbuffer!\n");
         depth = BUF_PAGES*2+1;
         exit = 1;
         //locked is needed externally here, in the standard case, the lock is held by ring_call
