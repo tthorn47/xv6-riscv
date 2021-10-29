@@ -26,6 +26,19 @@ extern char trampoline[]; // trampoline.S
 // must be acquired before any p->lock.
 struct spinlock wait_lock;
 
+// Lock to guarantee that any edits to the ready queue
+// Are made in a linear fashion.
+struct spinlock queue_lock;
+
+// Queue struct pointers
+// Head should be updated every time a process is set
+// to the RUNNING state in ANY CPU
+struct proc* ready_head;
+
+// Tail should be updated with every transtion of a proc
+// struct TO the RUNNABLE state
+struct proc* ready_tail;
+
 // Allocate a page for each process's kernel stack.
 // Map it high in memory, followed by an invalid
 // guard page.
@@ -164,6 +177,7 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->next_ready = 0;
 }
 
 // Create a user page table for a given process,
@@ -243,7 +257,9 @@ userinit(void)
   p->cwd = namei("/");
 
   p->state = RUNNABLE;
-
+  initlock(&queue_lock, "queuelock");
+  ready_head = p;
+  ready_tail = p;
   release(&p->lock);
 }
 
@@ -313,6 +329,7 @@ fork(void)
 
   acquire(&np->lock);
   np->state = RUNNABLE;
+  update_tail(np);
   release(&np->lock);
 
   return pid;
@@ -379,7 +396,6 @@ exit(int status)
 
   p->xstate = status;
   p->state = ZOMBIE;
-
   release(&wait_lock);
 
   // Jump into the scheduler, never to return.
@@ -446,7 +462,8 @@ wait(uint64 addr)
 void
 scheduler(void)
 {
-  struct proc *p;
+
+  //struct proc *p;
   struct cpu *c = mycpu();
   
   c->proc = 0;
@@ -454,22 +471,37 @@ scheduler(void)
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
 
-    for(p = proc; p < &proc[NPROC]; p++) {
-      acquire(&p->lock);
-      if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
 
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
+    acquire(&queue_lock);
+    if(ready_head){
+      struct proc* to_run = ready_head;
+      acquire(&to_run->lock);
+      
+      if(to_run->state != RUNNABLE){
+        printf("Proc->state: %d %s\n", to_run->state, to_run->name);
+        //dump_queue();
+        panic("non-runnable process attempting to be scheduled!\n");
       }
-      release(&p->lock);
+      
+      // Manage the queue
+      ready_head = to_run->next_ready;
+      to_run->next_ready = 0;
+      if(ready_head == 0){
+        ready_tail = 0;
+      }
+      release(&queue_lock);
+      // Update the process state
+      to_run->state = RUNNING;
+      // Update CPU proc
+      c->proc = to_run;
+      swtch(&c->context, &to_run->context);
+
+      // Process is done for the current time slice
+      c->proc = 0;
+      release(&to_run->lock);
+      acquire(&queue_lock);
     }
+    release(&queue_lock);
   }
 }
 
@@ -507,6 +539,7 @@ yield(void)
   struct proc *p = myproc();
   acquire(&p->lock);
   p->state = RUNNABLE;
+  update_tail(p);
   sched();
   release(&p->lock);
 }
@@ -551,6 +584,8 @@ sleep(void *chan, struct spinlock *lk)
 
   // Go to sleep.
   p->chan = chan;
+
+  //check_queue(p);
   p->state = SLEEPING;
 
   sched();
@@ -575,6 +610,7 @@ wakeup(void *chan)
       acquire(&p->lock);
       if(p->state == SLEEPING && p->chan == chan) {
         p->state = RUNNABLE;
+        update_tail(p);
       }
       release(&p->lock);
     }
@@ -596,6 +632,7 @@ kill(int pid)
       if(p->state == SLEEPING){
         // Wake process from sleep().
         p->state = RUNNABLE;
+        update_tail(p);
       }
       release(&p->lock);
       return 0;
@@ -662,4 +699,24 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+// Updates the tail of the ready list to the given proc pointer
+void inline __attribute__((always_inline)) update_tail(struct proc* p){
+
+  if(p->state != RUNNABLE)
+    panic("appending non-runnable process");
+
+  acquire(&queue_lock);
+  if(!ready_tail){
+    ready_head = p;
+    ready_tail = p;
+    release(&queue_lock);
+    return;
+  }
+  acquire(&ready_tail->lock);
+  ready_tail->next_ready = p;
+  release(&ready_tail->lock);
+  ready_tail = p;
+  release(&queue_lock);
 }
