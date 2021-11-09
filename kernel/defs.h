@@ -23,6 +23,9 @@ void            consoleinit(void);
 void            consoleintr(int);
 void            consputc(int);
 
+// cycle.c
+void            cycle_init(void);
+
 // exec.c
 int             exec(char*, char**);
 
