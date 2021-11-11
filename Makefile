@@ -29,7 +29,18 @@ OBJS = \
   $K/kernelvec.o \
   $K/plic.o \
   $K/virtio_disk.o \
-  $K/ringbuf.o
+  $K/ringbuf.o \
+  $K/cycle.o \
+  $K/barrier0.o \
+  $K/barrier1.o \
+  $K/barrier2.o \
+  $K/barrier3.o \
+  $K/barrier4.o \
+  $K/barrier5.o \
+  $K/barrier6.o \
+  $K/barrier7.o \
+  $K/barrier8.o \
+  $K/barrier9.o \
 
 # riscv64-unknown-elf- or riscv64-linux-gnu-
 # perhaps in /opt/riscv/bin
@@ -128,11 +139,14 @@ UPROGS=\
 	$U/_mkdir\
 	$U/_pipetest\
 	$U/_ringtest\
+	$U/_barrier_test\
+	$U/_rdcycle\
 	$U/_rm\
 	$U/_sh\
 	$U/_simple\
 	$U/_stressfs\
 	$U/_test1\
+	$U/_thebar\
 	$U/_testread\
 	$U/_usertests\
 	$U/_grind\

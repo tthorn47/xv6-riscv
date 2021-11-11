@@ -75,6 +75,8 @@ sys_read(void)
 
   if(argfd(0, 0, &f) < 0 || argint(2, &n) < 0 || argaddr(1, &p) < 0)
     return -1;
+  //printf("sysread f= %p p= %p n= %d\n", f, p, n);
+  //printf("%p\n", devsw[2]);
   return fileread(f, p, n);
 }
 

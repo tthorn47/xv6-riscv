@@ -9,7 +9,18 @@ struct sleeplock;
 struct stat;
 struct superblock;
 struct ringbuf;
-
+// barrier.c
+void            barrier_init();
+void            barrier0_init();
+void            barrier2_init();
+void            barrier3_init();
+void            barrier1_init();
+void            barrier4_init();
+void            barrier5_init();
+void            barrier6_init();
+void            barrier7_init();
+void            barrier8_init();
+void            barrier9_init();
 // bio.c
 void            binit(void);
 struct buf*     bread(uint, uint);

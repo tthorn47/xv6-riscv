@@ -8,7 +8,7 @@
 #include "kernel/file.h"
 #include "user/user.h"
 #include "kernel/fcntl.h"
-
+static char vals[11] = "0123456789";
 char *argv[] = { "sh", 0 };
 
 int
@@ -22,7 +22,24 @@ main(void)
   }
   dup(0);  // stdout
   dup(0);  // stderr
-
+  if(open("cycle", O_RDWR) < 0){
+    mknod("cycle", CYCLE, 0);
+    open("cycle", O_RDWR);
+    //printf("cycle opened");
+  }
+  for (int i = 0; i < 10; i++)
+  {
+    char name[] = "barrier0";
+    name[7] = vals[i];
+    //printf("%s\n",name);
+    if(open(name, O_RDWR) < 0){
+    mknod(name, i+3, 0);
+    open(name, O_RDWR);
+    //printf("cycle opened");
+  }
+  }
+  
+  
   for(;;){
     printf("init: starting sh\n");
     pid = fork();

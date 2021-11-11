@@ -39,3 +39,13 @@ extern struct devsw devsw[];
 
 #define CONSOLE 1
 #define CYCLE 2
+#define BARRIER0 3
+#define BARRIER1 4
+#define BARRIER2 5
+#define BARRIER3 6
+#define BARRIER4 7
+#define BARRIER5 8
+#define BARRIER6 9
+#define BARRIER7 10
+#define BARRIER8 11
+#define BARRIER9 12

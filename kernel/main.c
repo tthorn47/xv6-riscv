@@ -11,7 +11,6 @@ void
 main()
 {
   if(cpuid() == 0){
-    cycle_init();
     consoleinit();
     printfinit();
     printf("\n");
@@ -29,6 +28,17 @@ main()
     iinit();         // inode table
     fileinit();      // file table
     virtio_disk_init(); // emulated hard disk
+    cycle_init();
+    barrier0_init();
+    barrier1_init();
+    barrier2_init();
+    barrier3_init();
+    barrier4_init();
+    barrier5_init();
+    barrier6_init();
+    barrier7_init();
+    barrier8_init();
+    barrier9_init();
     userinit();      // first user process
     __sync_synchronize();
     started = 1;
