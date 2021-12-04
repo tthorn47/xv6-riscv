@@ -50,7 +50,7 @@ struct log {
 struct log logs[4];
 static void recover_from_log(void);
 static void commit();
-static int curr = 1;
+static int curr = 3;
 void
 initlog(int dev, struct superblock *sb)
 {
@@ -72,13 +72,13 @@ initlog(int dev, struct superblock *sb)
 
 // Copy committed blocks from log to their home location
 static void
-install_trans(int recovering)
+install_trans(int recovering, int ind)
 {
   int tail;
 
-  for (tail = 0; tail < logs[1].lh.n; tail++) {
-    struct buf *lbuf = bread(logs[1].dev, logs[1].start+tail+1); // read log block
-    struct buf *dbuf = bread(logs[1].dev, logs[1].lh.block[tail]); // read dst
+  for (tail = 0; tail < logs[ind].lh.n; tail++) {
+    struct buf *lbuf = bread(logs[ind].dev, logs[ind].start+tail+1); // read log block
+    struct buf *dbuf = bread(logs[ind].dev, logs[ind].lh.block[tail]); // read dst
     memmove(dbuf->data, lbuf->data, BSIZE);  // copy block to dst
     bwrite(dbuf);  // write dst to disk
     if(recovering == 0)
@@ -122,26 +122,26 @@ write_head(int ind)
 static void
 recover_from_log(void)
 {
-  read_head(1);
-  install_trans(1); // if committed, copy from log to disk
-  logs[1].lh.n = 0;
-  write_head(1); // clear the log
+  read_head(3);
+  install_trans(1, 3); // if committed, copy from log to disk
+  logs[3].lh.n = 0;
+  write_head(3); // clear the log
 }
 
 // called at the start of each FS system call.
 void
 begin_op(void)
 {
-  acquire(&logs[1].lock);
+  acquire(&logs[3].lock);
   while(1){
-    if(logs[1].committing){
-      sleep(&logs[1], &logs[1].lock);
-    } else if(logs[1].lh.n + (logs[1].outstanding+1)*MAXOPBLOCKS > LOGSIZE){
+    if(logs[3].committing){
+      sleep(&logs[3], &logs[3].lock);
+    } else if(logs[3].lh.n + (logs[3].outstanding+1)*MAXOPBLOCKS > LOGSIZE){
       // this op might exhaust log space; wait for commit.
-      sleep(&logs[1], &logs[1].lock);
+      sleep(&logs[3], &logs[3].lock);
     } else {
-      logs[1].outstanding += 1;
-      release(&logs[1].lock);
+      logs[3].outstanding += 1;
+      release(&logs[3].lock);
       break;
     }
   }
@@ -154,33 +154,33 @@ end_op(void)
 {
   int do_commit = 0;
 
-  acquire(&logs[1].lock);
-  logs[1].outstanding -= 1;
-  if(logs[1].committing)
-    panic("logs[1].committing");
-  if(logs[1].outstanding == 0){
+  acquire(&logs[3].lock);
+  logs[3].outstanding -= 1;
+  if(logs[3].committing)
+    panic("logs[3].committing");
+  if(logs[3].outstanding == 0){
     do_commit = 1;
-    logs[1].committing = 1;
+    logs[3].committing = 1;
   } else {
     // begin_op() may be waiting for log space,
-    // and decrementing logs[1].outstanding has decreased
+    // and decrementing logs[3].outstanding has decreased
     // the amount of reserved space.
-    wakeup(&logs[1]);
+    wakeup(&logs[3]);
   }
-  release(&logs[1].lock);
+  release(&logs[3].lock);
 
   if(do_commit){
     // call commit w/o holding locks, since not allowed
     // to sleep with locks.
-    commit(1);
-    acquire(&logs[1].lock);
-    logs[1].committing = 0;
-    wakeup(&logs[1]);
-    release(&logs[1].lock);
+    commit(3);
+    acquire(&logs[3].lock);
+    logs[3].committing = 0;
+    wakeup(&logs[3]);
+    release(&logs[3].lock);
   }
 }
 
-// Copy modified blocks from cache to logs[1].
+// Copy modified blocks from cache to logs[3].
 static void
 write_log(int ind)
 {
@@ -202,7 +202,7 @@ commit(int ind)
   if (logs[ind].lh.n > 0) {
     write_log(ind);     // Write modified blocks from cache to log
     write_head(ind);    // Write header to disk -- the real commit
-    install_trans(0); // Now install writes to home locations
+    install_trans(0, ind); // Now install writes to home locations
     logs[ind].lh.n = 0;
     write_head(ind);    // Erase the transaction from the log
   }
