@@ -50,7 +50,8 @@ struct log {
 struct log logs[4];
 static void recover_from_log(void);
 static void commit();
-static int curr = 3;
+static int prev = 0;
+static int curr = 1;
 void
 initlog(int dev, struct superblock *sb)
 {
@@ -132,16 +133,21 @@ recover_from_log(void)
 void
 begin_op(void)
 {
-  acquire(&logs[3].lock);
+  int ind;
+  __atomic_load(&curr,&ind,__ATOMIC_SEQ_CST);
+  acquire(&logs[ind].lock);
   while(1){
-    if(logs[3].committing){
-      sleep(&logs[3], &logs[3].lock);
-    } else if(logs[3].lh.n + (logs[3].outstanding+1)*MAXOPBLOCKS > LOGSIZE){
+    if(ind != curr){
+      acquire(&logs[curr].lock);
+      release(&logs[ind].lock);
+      __atomic_load(&curr,&ind,__ATOMIC_SEQ_CST);
+    }
+    if(logs[ind].lh.n + (logs[ind].outstanding+1)*MAXOPBLOCKS > LOGSIZE){
       // this op might exhaust log space; wait for commit.
-      sleep(&logs[3], &logs[3].lock);
+      sleep(&logs[ind], &logs[ind].lock);
     } else {
-      logs[3].outstanding += 1;
-      release(&logs[3].lock);
+      logs[ind].outstanding += 1;
+      release(&logs[ind].lock);
       break;
     }
   }
@@ -153,30 +159,49 @@ void
 end_op(void)
 {
   int do_commit = 0;
+  int ind;
+  __atomic_load(&curr,&ind,__ATOMIC_SEQ_CST);
 
-  acquire(&logs[3].lock);
-  logs[3].outstanding -= 1;
-  if(logs[3].committing)
-    panic("logs[3].committing");
-  if(logs[3].outstanding == 0){
-    do_commit = 1;
-    logs[3].committing = 1;
+  acquire(&logs[ind].lock);
+
+  logs[ind].outstanding -= 1;
+  if(logs[ind].committing)
+    panic("logs[ind].committing");
+  if(logs[ind].outstanding == 0){
+    if(logs[prev].committing){ //check if old log is still commiting
+      if(logs[ind].lh.n + MAXOPBLOCKS > LOGSIZE){ // Log is full
+        sleep(&logs[prev], &logs[ind].lock);
+      } else {
+        // Log isn't full, return the empty space to potentially be filled
+        wakeup(&logs[ind]);
+        release(&logs[ind].lock);
+        return;
+      }
+    }
+    //Old log isn't committing, proceed
+    
+    int next = (ind + 1) % 4;
+    __atomic_store(&curr, &next, __ATOMIC_SEQ_CST);
+    __atomic_store(&prev, &ind, __ATOMIC_SEQ_CST);
+    //printf("update curr = %d prev = %d\n", curr, prev);
+    do_commit = 1;  
+    logs[ind].committing = 1; 
   } else {
     // begin_op() may be waiting for log space,
     // and decrementing logs[3].outstanding has decreased
     // the amount of reserved space.
-    wakeup(&logs[3]);
+    wakeup(&logs[ind]);
   }
-  release(&logs[3].lock);
+  release(&logs[ind].lock);
 
   if(do_commit){
     // call commit w/o holding locks, since not allowed
     // to sleep with locks.
-    commit(3);
-    acquire(&logs[3].lock);
-    logs[3].committing = 0;
-    wakeup(&logs[3]);
-    release(&logs[3].lock);
+    commit(ind);
+    acquire(&logs[ind].lock);
+    logs[ind].committing = 0;
+    wakeup(&logs[ind]);
+    release(&logs[ind].lock);
   }
 }
 
@@ -222,7 +247,7 @@ log_write(struct buf *b)
 {
   int i, ind;
 
-  ind = curr;
+  __atomic_load(&curr,&ind,__ATOMIC_SEQ_CST);
   acquire(&logs[ind].lock);
   if (logs[ind].lh.n >= LOGSIZE || logs[ind].lh.n >= logs[ind].size - 1)
     panic("too big a transaction");
