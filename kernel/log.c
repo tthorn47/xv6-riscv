@@ -80,8 +80,11 @@ install_trans(int recovering, int ind)
   for (tail = 0; tail < logs[ind].lh.n; tail++) {
     struct buf *lbuf = bread(logs[ind].dev, logs[ind].start+tail+1); // read log block
     struct buf *dbuf = bread(logs[ind].dev, logs[ind].lh.block[tail]); // read dst
-    memmove(dbuf->data, lbuf->data, BSIZE);  // copy block to dst
+    uchar backup[BSIZE];
+    memcpy(backup,dbuf->data, BSIZE);
+    memmove(dbuf->data, lbuf->data, BSIZE);  // copy block to dst   
     bwrite(dbuf);  // write dst to disk
+    memcpy(dbuf->data, backup, BSIZE);
     if(recovering == 0)
       bunpin(dbuf);
     brelse(lbuf);
@@ -97,6 +100,7 @@ read_head(int ind)
   struct logheader *lh = (struct logheader *) (buf->data);
   int i;
   logs[ind].lh.n = lh->n;
+  logs[ind].lh.pos = lh->pos;
   for (i = 0; i < logs[ind].lh.n; i++) {
     logs[ind].lh.block[i] = lh->block[i];
   }
@@ -113,6 +117,7 @@ write_head(int ind)
   struct logheader *hb = (struct logheader *) (buf->data);
   int i;
   hb->n = logs[ind].lh.n;
+  hb->pos = logs[ind].lh.pos;
   for (i = 0; i < logs[ind].lh.n; i++) {
     hb->block[i] = logs[ind].lh.block[i];
   }
@@ -123,10 +128,37 @@ write_head(int ind)
 static void
 recover_from_log(void)
 {
-  read_head(3);
-  install_trans(1, 3); // if committed, copy from log to disk
-  logs[3].lh.n = 0;
-  write_head(3); // clear the log
+  uint64 start = 0;
+
+  for (int i = 0; i < LOGDEPTH; i++)
+  {
+    //printf("log[%d] pos = %d\n",i,logs[i].lh.pos);
+    if(logs[i].lh.pos > start){
+      start = logs[i].lh.pos;
+    }
+  }
+
+  if(start == 0){
+    //printf("no log\n");
+    for (int i = 1; i < LOGDEPTH; i++)
+    {
+      logs[i].lh.pos = i;
+    }
+    return;
+  }
+
+  for (int i = 0; i < LOGDEPTH; i++ , start = (start + 1) % 4)
+  {
+    if(i == 0)
+      curr = start;
+    if(i == LOGDEPTH)
+      prev = start;
+
+    read_head(start);
+    install_trans(1, start); // if committed, copy from log to disk
+    logs[start].lh.n = 0;
+    write_head(start);
+  }
 }
 
 // called at the start of each FS system call.
@@ -141,9 +173,10 @@ begin_op(void)
       acquire(&logs[curr].lock);
       release(&logs[ind].lock);
       __atomic_load(&curr,&ind,__ATOMIC_SEQ_CST);
-    }
-    if(logs[ind].lh.n + (logs[ind].outstanding+1)*MAXOPBLOCKS > LOGSIZE){
-      // this op might exhaust log space; wait for commit.
+    }if(logs[ind].lh.n + (logs[ind].outstanding+1)*MAXOPBLOCKS > LOGSIZE){
+      // this op might exhaust log space; wait to see if the current log will get free space
+      // or if current has advanced. Removing this sleep would require external tracking of
+      // log numbers, as current would need to be advanced in two places.
       sleep(&logs[ind], &logs[ind].lock);
     } else {
       logs[ind].outstanding += 1;
@@ -170,19 +203,24 @@ end_op(void)
   if(logs[ind].outstanding == 0){
     if(logs[prev].committing){ //check if old log is still commiting
       if(logs[ind].lh.n + MAXOPBLOCKS > LOGSIZE){ // Log is full
-        sleep(&logs[prev], &logs[ind].lock);
+        int localPrev = ind;
+        int next = (ind + 1) % 4;
+        __atomic_store(&curr, &next, __ATOMIC_SEQ_CST);
+        __atomic_store(&prev, &ind, __ATOMIC_SEQ_CST);
+        sleep(&logs[localPrev], &logs[ind].lock);
       } else {
         // Log isn't full, return the empty space to potentially be filled
         wakeup(&logs[ind]);
         release(&logs[ind].lock);
         return;
       }
+    } else {
+      int next = (ind + 1) % 4;
+        __atomic_store(&curr, &next, __ATOMIC_SEQ_CST);
+        __atomic_store(&prev, &ind, __ATOMIC_SEQ_CST);
+        
     }
     //Old log isn't committing, proceed
-    
-    int next = (ind + 1) % 4;
-    __atomic_store(&curr, &next, __ATOMIC_SEQ_CST);
-    __atomic_store(&prev, &ind, __ATOMIC_SEQ_CST);
     //printf("update curr = %d prev = %d\n", curr, prev);
     do_commit = 1;  
     logs[ind].committing = 1; 
@@ -200,7 +238,9 @@ end_op(void)
     commit(ind);
     acquire(&logs[ind].lock);
     logs[ind].committing = 0;
-    wakeup(&logs[ind]);
+    logs[ind].lh.pos++;
+    wakeup(&logs[ind]); //wakeup current waiters
+    wakeup(&logs[curr]); //wakeup potential waiters up the chain as curr is updated before a commit
     release(&logs[ind].lock);
   }
 }
@@ -253,6 +293,8 @@ log_write(struct buf *b)
     panic("too big a transaction");
   if (logs[ind].outstanding < 1)
     panic("log_write outside of trans");
+  if(logs[ind].committing)
+    panic("Writing to commiting log!");
 
   for (i = 0; i < logs[ind].lh.n; i++) {
     if (logs[ind].lh.block[i] == b->blockno)   // log absorption

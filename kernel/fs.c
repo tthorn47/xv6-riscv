@@ -89,6 +89,7 @@ balloc(uint dev)
 static void
 bfree(int dev, uint b)
 {
+  //printf("free block %d\n", b);
   struct buf *bp;
   int bi, m;
 
